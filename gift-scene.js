@@ -69,7 +69,7 @@ export async function initGiftScene() {
   mutation.observe(document.documentElement,{attributes:true,attributeFilter:['class']});
   mutation.observe(document.body,{attributes:true,attributeFilter:['data-chapter']});
   try {
-    const THREE = await import('./assets/three.module.min.js');
+    const THREE = await import('./assets/vendor/three.module.js');
     if (!live) return {dispose};
     renderer = new THREE.WebGLRenderer({canvas,alpha:true,antialias:innerWidth>700,powerPreference:'low-power'});
     renderer.setClearColor(0x000000,0); renderer.outputColorSpace=THREE.SRGBColorSpace;
