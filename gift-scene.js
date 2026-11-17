@@ -3,13 +3,13 @@ export async function initGiftScene() {
   const canvas = document.querySelector('#gift-canvas');
   const host = document.querySelector('#gift-world');
   if (!canvas || !host) return { dispose() {} };
-  const reduce = matchMedia('(prefers-reduced-motion: reduce)');
-  const motionAllowed = () => !reduce.matches && !document.documentElement.classList.contains('motion-paused');
+  const motionAllowed = () => !document.documentElement.classList.contains('motion-paused');
   const resources = new Set();
   const own = resource => (resources.add(resource), resource);
   let renderer, world, camera, sculpture, halo, stars, observer, resizeObserver;
   let frame = 0, live = true, visible = true, elapsed = 0, last = 0;
   let px = 0, py = 0, ex = 0, ey = 0, depth = 0;
+  let boost = 0, boostDir = 1, kickAt = -1e9;
   const canRender = () => live && visible && !document.hidden;
   function stop() { if (frame) cancelAnimationFrame(frame); frame = 0; last = 0; }
   function request() { if (renderer && canRender() && !frame) frame = requestAnimationFrame(draw); }
@@ -26,14 +26,18 @@ export async function initGiftScene() {
     const expanded = !['0', 'intro', 'cover', 'closed'].includes(chapter);
     const target = expanded ? 1 : 0;
     depth += (target - depth) * (moving ? Math.min(1, delta * 1.5) : 1);
-    sculpture.rotation.y = .10 + Math.sin(elapsed * .28) * .10 + ex * .18 + depth * .25;
-    sculpture.rotation.x = Math.sin(elapsed * .22) * .055 + ey * .11;
-    sculpture.rotation.z = Math.sin(elapsed * .19) * .035;
-    const pulse = 1 + Math.sin(elapsed * .8) * .018;
-    sculpture.scale.setScalar((host.clientWidth < 700 ? .79 : 1) * (1 - depth * .13) * pulse);
+    // Затухание по времени: даже если кадры просели, эффект не залипнет.
+    boost = Math.max(0, 1 - (performance.now() - kickAt) / 900);
+    const kick = boostDir * boost;
+    sculpture.rotation.y = .10 + Math.sin(elapsed * .28) * .10 + ex * .18 + depth * .25 + kick * Math.PI * 1.5;
+    sculpture.rotation.x = Math.sin(elapsed * .22) * .055 + ey * .11 + kick * .52;
+    sculpture.rotation.z = Math.sin(elapsed * .19) * .035 + kick * .38;
+    const pulse = 1 + Math.sin(elapsed * .8) * .018 + boost * .05;
+    sculpture.scale.setScalar((host.clientWidth < 700 ? .79 : 1) * (1 - depth * .13) * pulse * (1 + boost * .17));
     sculpture.position.x = host.clientWidth < 700 ? 0 : 1.65;
-    sculpture.position.y = (host.clientWidth < 700 ? 1.12 : 0) + Math.sin(elapsed * .5) * .045;
-    halo.rotation.z = elapsed * .045;
+    sculpture.position.y = (host.clientWidth < 700 ? 1.12 : 0) + Math.sin(elapsed * .5) * .045 - boost * .1;
+    camera.position.z = (host.clientWidth < 700 ? 8.9 : 8.1) - boost * 1.7;
+    halo.rotation.z = elapsed * (.045 + boost * 2.2);
     stars.rotation.z = elapsed * .009;
     renderer.render(world, camera);
     if (moving) frame = requestAnimationFrame(draw);
@@ -57,12 +61,15 @@ export async function initGiftScene() {
     request();
   }
   function leave() { px = 0; py = 0; request(); }
-  function onMotion() { stop(); request(); }
+  /* Пинок от app.js: звезда проворачивается, камера подъезжает ближе. */
+  function kick(direction) { kickAt = performance.now(); boostDir = direction === 'back' ? -1 : 1; boost = 1; request(); }
+  function onKick(event) { kick(event.detail && event.detail.direction); }
   function onVisibility() { if (document.hidden) stop(); else request(); }
   function dispose() {
     live = false; stop(); observer?.disconnect(); resizeObserver?.disconnect(); mutation.disconnect();
     window.removeEventListener('resize',resize); host.removeEventListener('pointermove',pointer); host.removeEventListener('pointerleave',leave);
-    document.removeEventListener('visibilitychange',onVisibility); reduce.removeEventListener?.('change',onMotion);
+    document.removeEventListener('visibilitychange',onVisibility);
+    document.removeEventListener('keepsake:kick',onKick);
     resources.forEach(item => item.dispose?.()); renderer?.dispose();
   }
   const mutation = new MutationObserver(() => { if (renderer) { stop(); request(); } });
@@ -103,13 +110,15 @@ export async function initGiftScene() {
     stars=new THREE.Points(pointsGeo,pointsMat);world.add(stars);
     host.dataset.gift3d='ready';
     window.addEventListener('resize',resize,{passive:true});host.addEventListener('pointermove',pointer,{passive:true});host.addEventListener('pointerleave',leave,{passive:true});
-    document.addEventListener('visibilitychange',onVisibility);reduce.addEventListener?.('change',onMotion);
+    document.addEventListener('visibilitychange',onVisibility);document.addEventListener('keepsake:kick',onKick);
     if('IntersectionObserver'in window){observer=new IntersectionObserver(([entry])=>{visible=entry.isIntersecting;if(visible)request();else stop()});observer.observe(host)}
     if('ResizeObserver'in window){resizeObserver=new ResizeObserver(resize);resizeObserver.observe(host)}
     window.addEventListener('pagehide',event=>{if(!event.persisted)dispose()},{once:true});
     resize();
   } catch(error) {
     host.dataset.gift3d='unavailable';renderer?.dispose();
+    // Без WebGL остаётся CSS-звезда, чтобы поздравление всё равно двигалось.
+    document.body.classList.add('no-webgl');
     console.warn('Праздничная сцена недоступна, остаётся статичное оформление.',error);
   }
   return {dispose};
